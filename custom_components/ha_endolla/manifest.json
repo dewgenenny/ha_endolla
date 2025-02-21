@@ -1,0 +1,10 @@
+{
+  "domain": "endolla",
+  "name": "Endolla",
+  "version": "1.0.0",
+  "documentation": "https://www.example.com",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [],
+  "config_flow": true
+}

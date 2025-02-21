@@ -1,0 +1,9 @@
+{
+  "name": "Endolla Integration",
+  "description": "Home Assistant custom integration for Endolla Barcelona EV charging stations.",
+  "domains": ["endolla"],
+  "country": "ES",
+  "homeassistant": "2023.2.0",
+  "iot_class": "cloud_polling",
+  "render_readme": true
+}
