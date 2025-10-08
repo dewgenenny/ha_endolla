@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Endolla Station Overview</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7fb;
+      --panel: #ffffffcc;
+      --text: #1b1f3b;
+      --accent: #2f6fed;
+      --muted: #66728a;
+      --border: #d9deeb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #f4f7ff, #eef1f8 30%, #e3e7f1 70%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2.5rem 1.5rem;
+      color: var(--text);
+    }
+
+    .dashboard {
+      width: min(960px, 100%);
+      background: var(--panel);
+      border-radius: 24px;
+      padding: 2.5rem;
+      box-shadow: 0 30px 60px -40px rgba(27, 31, 59, 0.6);
+      backdrop-filter: blur(18px);
+    }
+
+    h1 {
+      margin: 0 0 0.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-size: clamp(1.75rem, 3vw, 2.4rem);
+    }
+
+    p.subtitle {
+      margin: 0 0 2rem;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      width: 100%;
+      height: clamp(280px, 40vw, 360px);
+      border-radius: 18px;
+      background: #fff;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .chart {
+      width: 100%;
+      height: 100%;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(120deg, rgba(255, 255, 255, 0.92) 35%, rgba(240, 244, 255, 0.82));
+      pointer-events: none;
+      transition: opacity 240ms ease-out;
+    }
+
+    .loading-overlay.hidden {
+      opacity: 0;
+    }
+
+    .shimmer-bars {
+      width: 80%;
+      height: 60%;
+      display: flex;
+      align-items: flex-end;
+      gap: 0.75rem;
+    }
+
+    .shimmer-bars span {
+      flex: 1;
+      background: linear-gradient(90deg, rgba(214, 222, 245, 0.7), rgba(241, 246, 255, 0.95), rgba(214, 222, 245, 0.7));
+      background-size: 240% 100%;
+      border-radius: 12px 12px 6px 6px;
+      animation: shimmer 1.2s ease-in-out infinite;
+    }
+
+    .shimmer-bars span:nth-child(odd) {
+      animation-delay: 120ms;
+    }
+
+    .shimmer-bars span:nth-child(even) {
+      animation-delay: 240ms;
+    }
+
+    @keyframes shimmer {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+
+    .legend {
+      margin-top: 1.75rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 2rem;
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .legend i {
+      width: 12px;
+      height: 12px;
+      display: inline-block;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    @media (max-width: 640px) {
+      .dashboard {
+        padding: 1.75rem;
+      }
+      .chart-wrapper {
+        height: 240px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="dashboard">
+    <h1>Endolla Station Utilisation</h1>
+    <p class="subtitle">Live charge-point availability from the last data refresh.</p>
+    <div class="chart-wrapper">
+      <canvas id="statusChart" class="chart" role="img" aria-label="Station availability chart"></canvas>
+      <div id="loadingOverlay" class="loading-overlay" aria-hidden="true">
+        <div class="shimmer-bars" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i></i> Ports available per time slice</span>
+      <span>Animated entry shows the latest refresh snapshot.</span>
+    </div>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("statusChart");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("loadingOverlay");
+
+    const theme = {
+      bar: "#2f6fed",
+      barGradient: [
+        "rgba(47, 111, 237, 0.88)",
+        "rgba(47, 111, 237, 0.62)"
+      ],
+      axis: "#d2d9eb",
+      text: "#3a4561"
+    };
+
+    const chartConfig = {
+      padding: {
+        top: 36,
+        right: 40,
+        bottom: 48,
+        left: 48
+      },
+      animationDuration: 850
+    };
+
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radius) {
+        const radii = typeof radius === "number" ? [radius, radius, radius, radius] : radius;
+        const [tl, tr, br, bl] = radii;
+        this.beginPath();
+        this.moveTo(x + tl, y);
+        this.lineTo(x + width - tr, y);
+        this.quadraticCurveTo(x + width, y, x + width, y + tr);
+        this.lineTo(x + width, y + height - br);
+        this.quadraticCurveTo(x + width, y + height, x + width - br, y + height);
+        this.lineTo(x + bl, y + height);
+        this.quadraticCurveTo(x, y + height, x, y + height - bl);
+        this.lineTo(x, y + tl);
+        this.quadraticCurveTo(x, y, x + tl, y);
+        this.closePath();
+        return this;
+      };
+    }
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
+
+    function drawAxes(maxValue, labels) {
+      const { left, bottom, right, top } = chartConfig.padding;
+      const width = canvas.clientWidth - left - right;
+      const height = canvas.clientHeight - top - bottom;
+
+      ctx.strokeStyle = theme.axis;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(left, top + height);
+      ctx.lineTo(left + width, top + height);
+      ctx.stroke();
+
+      ctx.fillStyle = theme.text;
+      ctx.font = "500 13px 'Inter', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+
+      const step = width / (labels.length - 1 || 1);
+      labels.forEach((label, index) => {
+        const x = left + index * step;
+        ctx.fillText(label, x, top + height + 12);
+      });
+
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+
+      const tickCount = Math.min(4, maxValue);
+      const tickStep = Math.ceil(maxValue / tickCount);
+      for (let value = tickStep; value <= maxValue; value += tickStep) {
+        const y = top + height - (value / maxValue) * height;
+        ctx.fillText(value, left - 12, y);
+        ctx.beginPath();
+        ctx.moveTo(left - 6, y);
+        ctx.lineTo(left + width, y);
+        ctx.setLineDash([6, 10]);
+        ctx.strokeStyle = "rgba(210, 217, 235, 0.6)";
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    function drawBars(progress, values) {
+      const labels = values.map((item) => item.label);
+      const points = values.map((item) => item.value);
+      const maxValue = Math.max(...points, 1);
+      const { left, bottom, right, top } = chartConfig.padding;
+      const width = canvas.clientWidth - left - right;
+      const height = canvas.clientHeight - top - bottom;
+      const barWidth = Math.min(60, width / (values.length * 1.4));
+      const gap = (width - barWidth * values.length) / (values.length - 1 || 1);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawAxes(maxValue, labels);
+
+      const gradient = ctx.createLinearGradient(0, top, 0, top + height);
+      gradient.addColorStop(0, theme.barGradient[0]);
+      gradient.addColorStop(1, theme.barGradient[1]);
+
+      ctx.fillStyle = gradient;
+      ctx.strokeStyle = "rgba(47, 111, 237, 0.4)";
+      ctx.lineWidth = 2;
+
+      values.forEach((item, index) => {
+        const x = left + index * (barWidth + gap);
+        const targetHeight = (item.value / maxValue) * height;
+        const animatedHeight = targetHeight * progress;
+        const y = top + height - animatedHeight;
+
+        ctx.fillStyle = gradient;
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, animatedHeight, 12);
+        ctx.shadowColor = `rgba(47, 111, 237, ${0.25 + 0.45 * progress})`;
+        ctx.shadowBlur = 18 * progress;
+        ctx.shadowOffsetY = 8 * progress;
+        ctx.fill();
+        ctx.restore();
+
+        ctx.fillStyle = theme.text;
+        ctx.font = "600 14px 'Inter', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(item.value, x + barWidth / 2, y - 8);
+        ctx.fillStyle = gradient;
+      });
+    }
+
+    function animateChart(values) {
+      const start = performance.now();
+      const duration = chartConfig.animationDuration;
+
+      function frame(now) {
+        const elapsed = now - start;
+        const progress = Math.min(1, elapsed / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        drawBars(eased, values);
+
+        if (progress < 1) {
+          requestAnimationFrame(frame);
+        }
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    async function loadData() {
+      const mockResponse = await new Promise((resolve) => {
+        setTimeout(() => {
+          resolve([
+            { label: "08:00", value: 3 },
+            { label: "10:00", value: 5 },
+            { label: "12:00", value: 4 },
+            { label: "14:00", value: 6 },
+            { label: "16:00", value: 5 }
+          ]);
+        }, 650);
+      });
+
+      overlay.classList.add("hidden");
+      setTimeout(() => overlay.remove(), 260);
+      animateChart(mockResponse);
+    }
+
+    function init() {
+      resizeCanvas();
+      drawBars(0, [
+        { label: "08:00", value: 0 },
+        { label: "10:00", value: 0 },
+        { label: "12:00", value: 0 },
+        { label: "14:00", value: 0 },
+        { label: "16:00", value: 0 }
+      ]);
+      loadData();
+    }
+
+    window.addEventListener("resize", () => {
+      resizeCanvas();
+      loadData();
+    });
+
+    init();
+  </script>
+</body>
+</html>
